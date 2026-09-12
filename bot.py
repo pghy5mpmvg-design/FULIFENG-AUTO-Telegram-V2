@@ -1,7 +1,9 @@
 import os
-import sqlite3
 import logging
 from datetime import datetime
+
+import psycopg2
+from psycopg2.extras import RealDictCursor
 
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import CommandStart, Command
@@ -11,16 +13,18 @@ from dotenv import load_dotenv
 load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+DATABASE_URL = os.getenv("DATABASE_URL")
 
 if not BOT_TOKEN:
     raise RuntimeError("BOT_TOKEN is not set")
+
+if not DATABASE_URL:
+    raise RuntimeError("DATABASE_URL is not set")
 
 logging.basicConfig(level=logging.INFO)
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
-
-DB_FILE = "customers.db"
 
 
 # =========================================================
@@ -28,7 +32,8 @@ DB_FILE = "customers.db"
 # =========================================================
 
 def get_db():
-    return sqlite3.connect(DB_FILE)
+
+    return psycopg2.connect(DATABASE_URL)
 
 
 def init_db():
@@ -38,8 +43,8 @@ def init_db():
 
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS customers (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        telegram_id INTEGER UNIQUE,
+        id SERIAL PRIMARY KEY,
+        telegram_id BIGINT UNIQUE NOT NULL,
         username TEXT,
         name TEXT,
         country TEXT DEFAULT 'Россия',
@@ -52,12 +57,13 @@ def init_db():
         grade TEXT DEFAULT 'C',
         status TEXT DEFAULT 'new',
         last_message TEXT,
-        created_at TEXT,
-        updated_at TEXT
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     """)
 
     conn.commit()
+    cursor.close()
     conn.close()
 
 
@@ -66,33 +72,39 @@ def create_customer(message):
     conn = get_db()
     cursor = conn.cursor()
 
-    now = datetime.now().isoformat()
-
     cursor.execute("""
-    INSERT OR IGNORE INTO customers
+    INSERT INTO customers
     (
         telegram_id,
         username,
         name,
-        country,
-        created_at,
-        updated_at
+        country
     )
-    VALUES (?, ?, ?, ?, ?, ?)
+    VALUES (%s, %s, %s, %s)
+
+    ON CONFLICT (telegram_id)
+    DO UPDATE SET
+        username = EXCLUDED.username,
+        name = EXCLUDED.name,
+        updated_at = CURRENT_TIMESTAMP
     """, (
         message.from_user.id,
         message.from_user.username or "",
         message.from_user.first_name or "",
-        "Россия",
-        now,
-        now
+        "Россия"
     ))
 
     conn.commit()
+
+    cursor.close()
     conn.close()
 
 
-def update_customer(telegram_id, field, value):
+def update_customer(
+    telegram_id,
+    field,
+    value
+):
 
     allowed_fields = [
         "city",
@@ -112,36 +124,46 @@ def update_customer(telegram_id, field, value):
     conn = get_db()
     cursor = conn.cursor()
 
-    cursor.execute(
-        f"""
+    query = f"""
         UPDATE customers
-        SET {field} = ?, updated_at = ?
-        WHERE telegram_id = ?
-        """,
+        SET {field} = %s,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE telegram_id = %s
+    """
+
+    cursor.execute(
+        query,
         (
             value,
-            datetime.now().isoformat(),
             telegram_id
         )
     )
 
     conn.commit()
+
+    cursor.close()
     conn.close()
 
 
 def get_customer(telegram_id):
 
     conn = get_db()
-    cursor = conn.cursor()
+
+    cursor = conn.cursor(
+        cursor_factory=RealDictCursor
+    )
 
     cursor.execute("""
-    SELECT *
-    FROM customers
-    WHERE telegram_id = ?
-    """, (telegram_id,))
+        SELECT *
+        FROM customers
+        WHERE telegram_id = %s
+    """, (
+        telegram_id,
+    ))
 
     result = cursor.fetchone()
 
+    cursor.close()
     conn.close()
 
     return result
@@ -152,22 +174,28 @@ def get_stats():
     conn = get_db()
     cursor = conn.cursor()
 
-    cursor.execute("SELECT COUNT(*) FROM customers")
+    cursor.execute(
+        "SELECT COUNT(*) FROM customers"
+    )
+
     total = cursor.fetchone()[0]
 
     cursor.execute(
         "SELECT COUNT(*) FROM customers WHERE grade='A'"
     )
+
     a = cursor.fetchone()[0]
 
     cursor.execute(
         "SELECT COUNT(*) FROM customers WHERE grade='B'"
     )
+
     b = cursor.fetchone()[0]
 
     cursor.execute(
         "SELECT COUNT(*) FROM customers WHERE grade='C'"
     )
+
     c = cursor.fetchone()[0]
 
     conn.close()
@@ -184,33 +212,34 @@ def calculate_grade(customer):
     if not customer:
         return "C"
 
-    city = customer[5]
-    car = customer[6]
-    year = customer[7]
-    budget = customer[8]
-    quantity = customer[9]
-    purchase_time = customer[10]
-
     score = 0
 
-    if car:
+    if customer.get("car"):
         score += 2
 
-    if year:
+    if customer.get("year"):
         score += 1
 
-    if budget:
+    if customer.get("budget"):
         score += 2
 
-    if city:
+    if customer.get("city"):
         score += 1
 
-    if quantity:
+    if customer.get("quantity"):
         score += 1
 
-    if purchase_time:
-        if "1" in purchase_time or "сейчас" in purchase_time.lower():
+    if customer.get("purchase_time"):
+
+        purchase_time = customer["purchase_time"].lower()
+
+        if (
+            "сейчас" in purchase_time
+            or "1 нед" in purchase_time
+            or "1 неделю" in purchase_time
+        ):
             score += 3
+
         else:
             score += 1
 
@@ -225,9 +254,13 @@ def calculate_grade(customer):
 
 def refresh_grade(telegram_id):
 
-    customer = get_customer(telegram_id)
+    customer = get_customer(
+        telegram_id
+    )
 
-    grade = calculate_grade(customer)
+    grade = calculate_grade(
+        customer
+    )
 
     update_customer(
         telegram_id,
@@ -239,18 +272,26 @@ def refresh_grade(telegram_id):
 
 
 # =========================================================
-# MAIN KEYBOARD
+# MAIN MENU
 # =========================================================
 
 main_keyboard = ReplyKeyboardMarkup(
     keyboard=[
         [
-            KeyboardButton(text="🚗 Подобрать автомобиль"),
-            KeyboardButton(text="💰 Узнать цену")
+            KeyboardButton(
+                text="🚗 Подобрать автомобиль"
+            ),
+            KeyboardButton(
+                text="💰 Узнать цену"
+            )
         ],
         [
-            KeyboardButton(text="📋 Мои требования"),
-            KeyboardButton(text="👨‍💼 Менеджер")
+            KeyboardButton(
+                text="📋 Мои требования"
+            ),
+            KeyboardButton(
+                text="👨‍💼 Менеджер"
+            )
         ]
     ],
     resize_keyboard=True
@@ -258,11 +299,13 @@ main_keyboard = ReplyKeyboardMarkup(
 
 
 # =========================================================
-# /START
+# START
 # =========================================================
 
 @dp.message(CommandStart())
-async def start_handler(message: types.Message):
+async def start_handler(
+    message: types.Message
+):
 
     create_customer(message)
 
@@ -270,12 +313,11 @@ async def start_handler(message: types.Message):
         """
 🇷🇺 Здравствуйте!
 
-Добро пожаловать в **FULIFENG AUTO** 🇨🇳🚗
+Добро пожаловать в FULIFENG AUTO 🇨🇳🚗
 
-Мы помогаем покупать автомобили напрямую из Китая
-с доставкой в Россию и страны СНГ.
-
-Наши услуги:
+Мы помогаем покупать автомобили
+напрямую из Китая с доставкой
+в Россию и страны СНГ.
 
 🚗 Новые автомобили
 🚙 Автомобили с пробегом
@@ -294,8 +336,13 @@ async def start_handler(message: types.Message):
 # BUY CAR
 # =========================================================
 
-@dp.message(lambda message: message.text == "🚗 Подобрать автомобиль")
-async def buy_car(message: types.Message):
+@dp.message(
+    lambda message:
+    message.text == "🚗 Подобрать автомобиль"
+)
+async def buy_car(
+    message: types.Message
+):
 
     create_customer(message)
 
@@ -305,7 +352,7 @@ async def buy_car(message: types.Message):
 
 Давайте подберём автомобиль.
 
-Напишите, пожалуйста:
+Напишите:
 
 1️⃣ Марка и модель
 2️⃣ Желаемый год
@@ -328,14 +375,20 @@ BMW X5
 # PRICE
 # =========================================================
 
-@dp.message(lambda message: message.text == "💰 Узнать цену")
-async def price(message: types.Message):
+@dp.message(
+    lambda message:
+    message.text == "💰 Узнать цену"
+)
+async def price(
+    message: types.Message
+):
 
     create_customer(message)
 
     await message.answer(
         """
-💰 Рассчитаем стоимость автомобиля из Китая.
+💰 Рассчитаем стоимость автомобиля
+из Китая.
 
 Напишите:
 
@@ -344,8 +397,6 @@ async def price(message: types.Message):
 ⚙️ Комплектация
 💰 Бюджет
 📍 Город доставки
-
-После этого менеджер подготовит расчёт.
 """
     )
 
@@ -354,16 +405,19 @@ async def price(message: types.Message):
 # REQUIREMENTS
 # =========================================================
 
-@dp.message(lambda message: message.text == "📋 Мои требования")
-async def requirements(message: types.Message):
+@dp.message(
+    lambda message:
+    message.text == "📋 Мои требования"
+)
+async def requirements(
+    message: types.Message
+):
 
     create_customer(message)
 
     await message.answer(
         """
-📋 Ваши требования к автомобилю.
-
-Отправьте одним сообщением:
+📋 Отправьте одним сообщением:
 
 Марка:
 Модель:
@@ -387,8 +441,13 @@ Toyota RAV4
 # MANAGER
 # =========================================================
 
-@dp.message(lambda message: message.text == "👨‍💼 Менеджер")
-async def manager(message: types.Message):
+@dp.message(
+    lambda message:
+    message.text == "👨‍💼 Менеджер"
+)
+async def manager(
+    message: types.Message
+):
 
     await message.answer(
         """
@@ -402,17 +461,20 @@ async def manager(message: types.Message):
 📑 объяснить экспорт
 
 Telegram:
+
 @fulifeng
 """
     )
 
 
 # =========================================================
-# ADMIN STATS
+# STATS
 # =========================================================
 
 @dp.message(Command("stats"))
-async def stats_handler(message: types.Message):
+async def stats_handler(
+    message: types.Message
+):
 
     total, a, b, c = get_stats()
 
@@ -432,11 +494,13 @@ D级客户不进入重点跟进。
 
 
 # =========================================================
-# CUSTOMER MESSAGE PROCESSING
+# CUSTOMER MESSAGE
 # =========================================================
 
 @dp.message()
-async def customer_message(message: types.Message):
+async def customer_message(
+    message: types.Message
+):
 
     create_customer(message)
 
@@ -450,15 +514,12 @@ async def customer_message(message: types.Message):
         text
     )
 
-    customer = get_customer(telegram_id)
-
-    # -----------------------------------------------------
-    # 自动识别一些常见信息
-    # -----------------------------------------------------
-
     lower_text = text.lower()
 
-    # 城市
+    # =====================================================
+    # CITY
+    # =====================================================
+
     cities = [
         "москва",
         "санкт-петербург",
@@ -468,7 +529,12 @@ async def customer_message(message: types.Message):
         "казань",
         "красноярск",
         "иркутск",
-        "хабаровск"
+        "хабаровск",
+        "омск",
+        "самара",
+        "ростов",
+        "уфа",
+        "пермь"
     ]
 
     for city in cities:
@@ -483,19 +549,10 @@ async def customer_message(message: types.Message):
 
             break
 
-    # 数量
-    if any(
-        word in lower_text
-        for word in ["2 авто", "3 авто", "5 авто", "10 авто", "оптом"]
-    ):
+    # =====================================================
+    # CAR
+    # =====================================================
 
-        update_customer(
-            telegram_id,
-            "quantity",
-            text
-        )
-
-    # 车型关键词
     car_keywords = [
         "toyota",
         "bmw",
@@ -512,7 +569,10 @@ async def customer_message(message: types.Message):
         "byd",
         "zeekr",
         "li auto",
-        "jetta"
+        "jetta",
+        "tank",
+        "exeed",
+        "omoda"
     ]
 
     for car in car_keywords:
@@ -527,15 +587,41 @@ async def customer_message(message: types.Message):
 
             break
 
-    # -----------------------------------------------------
-    # 自动评级
-    # -----------------------------------------------------
+    # =====================================================
+    # QUANTITY
+    # =====================================================
 
-    grade = refresh_grade(telegram_id)
+    quantity_words = [
+        "2 авто",
+        "3 авто",
+        "5 авто",
+        "10 авто",
+        "оптом",
+        "несколько автомобилей"
+    ]
 
-    # -----------------------------------------------------
-    # 回复客户
-    # -----------------------------------------------------
+    if any(
+        word in lower_text
+        for word in quantity_words
+    ):
+
+        update_customer(
+            telegram_id,
+            "quantity",
+            text
+        )
+
+    # =====================================================
+    # AUTO GRADE
+    # =====================================================
+
+    grade = refresh_grade(
+        telegram_id
+    )
+
+    # =====================================================
+    # RESPONSE
+    # =====================================================
 
     if grade == "A":
 
@@ -544,9 +630,10 @@ async def customer_message(message: types.Message):
 
 Ваш запрос выглядит очень конкретным.
 
-Мы можем быстро подобрать варианты из Китая.
+Мы можем быстро подобрать варианты
+из Китая.
 
-Пожалуйста, отправьте:
+Отправьте:
 
 🚗 модель
 📅 год
@@ -559,12 +646,12 @@ async def customer_message(message: types.Message):
     elif grade == "B":
 
         reply = """
-👍 Спасибо за информацию!
+👍 Спасибо!
 
 Мы можем подобрать несколько вариантов
 из Китая под ваш бюджет.
 
-Напишите, пожалуйста:
+Напишите:
 
 🚗 желаемую модель
 💰 бюджет
@@ -587,15 +674,15 @@ async def customer_message(message: types.Message):
 💰 бюджет
 📍 город
 
-FULIFENG AUTO поможет подобрать автомобиль
-напрямую из Китая.
+FULIFENG AUTO поможет подобрать
+автомобиль напрямую из Китая.
 """
 
     await message.answer(reply)
 
 
 # =========================================================
-# START BOT
+# RUN
 # =========================================================
 
 async def main():
