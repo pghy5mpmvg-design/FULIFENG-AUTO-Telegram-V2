@@ -1,0 +1,8 @@
+{
+  "name":"fulifeng-auto-telegram-v2",
+  "version":"2.5.0",
+  "private":true,
+  "type":"module",
+  "scripts":{"start":"node src/index.js"},
+  "dependencies":{"dotenv":"^16.4.7","telegraf":"^4.16.3","openai":"^5.12.2"}
+}
