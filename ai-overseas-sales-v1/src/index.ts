@@ -7,6 +7,8 @@ import { ingestLead } from "./services/lead-ingestion.js";
 import { generateFirstTouch } from "./services/message-generator.js";
 import { classifyReply } from "./services/reply-classifier.js";
 import { prepareFirstTouch } from "./services/outreach-service.js";
+import { handleReply } from "./services/reply-handler.js";
+import { getDueFollowups } from "./services/followup.js";
 
 const app = Fastify({ logger: true });
 const enrichment = new BasicEnrichmentProvider();
@@ -88,6 +90,39 @@ app.post("/v1/outreach/prepare", async (request, reply) => {
     channel: body.channel,
     campaignId: body.campaignId,
     offer: body.offer
+  });
+
+  return reply.send(result);
+});
+
+app.get("/v1/followups/due", async (request, reply) => {
+  const query = request.query as { limit?: string };
+  const limit = Number(query.limit || 100);
+  const rows = await getDueFollowups(limit);
+  return reply.send({ count: rows.length, rows });
+});
+
+app.post("/v1/replies/handle", async (request, reply) => {
+  const body = request.body as {
+    leadId?: string;
+    messageId?: string;
+    text?: string;
+    channel?: "EMAIL" | "WHATSAPP" | "TELEGRAM" | "LINKEDIN" | "OTHER";
+    senderIdentity?: string;
+  };
+
+  if (!body.leadId || !body.text?.trim() || !body.channel) {
+    return reply.code(400).send({
+      error: "LEAD_ID_TEXT_AND_CHANNEL_REQUIRED"
+    });
+  }
+
+  const result = await handleReply({
+    leadId: body.leadId,
+    messageId: body.messageId,
+    text: body.text,
+    channel: body.channel,
+    senderIdentity: body.senderIdentity
   });
 
   return reply.send(result);
