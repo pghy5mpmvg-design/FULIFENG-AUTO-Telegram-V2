@@ -17,4 +17,4 @@ RUN npm install --omit=dev
 RUN npx prisma generate
 COPY --from=build /app/dist ./dist
 EXPOSE 3000
-CMD ["sh", "-c", "npx prisma migrate deploy && node dist/index.js"]
+CMD ["sh", "-c", "if [ \"$PRISMA_BASELINE\" = \"true\" ]; then npx prisma migrate resolve --applied 202609200001_init; fi && npx prisma migrate deploy && node dist/index.js"]
