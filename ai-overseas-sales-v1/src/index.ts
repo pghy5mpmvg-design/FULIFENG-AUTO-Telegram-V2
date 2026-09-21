@@ -8,7 +8,7 @@ import { generateFirstTouch } from "./services/message-generator.js";
 import { classifyReply } from "./services/reply-classifier.js";
 import { prepareFirstTouch } from "./services/outreach-service.js";
 import { handleReply } from "./services/reply-handler.js";
-import { getDueFollowups } from "./services/followup.js";
+import { getDueFollowups, scheduleNextFollowup } from "./services/followup.js";
 import { ingestLeadBatch } from "./services/bulk-ingestion.js";
 import { databaseHealth } from "./services/system-health.js";
 import { db } from "./db.js";
@@ -23,7 +23,7 @@ const enrichment = new BasicEnrichmentProvider();
 app.get("/health", async () => ({
   ok: true,
   service: "ai-overseas-sales-engine-v1",
-  version: "0.4.0"
+  version: "0.5.0"
 }));
 
 app.get("/health/db", async (_request, reply) => {
@@ -392,6 +392,202 @@ app.post("/v1/outreach/prepare", async (request, reply) => {
   });
 
   return reply.send(result);
+});
+
+app.get("/v1/outreach/pending-approval", async (request, reply) => {
+  const query = request.query as { limit?: string };
+  const limit = Math.max(1, Math.min(Number(query.limit || 50), 200));
+
+  const rows = await db.outreachMessage.findMany({
+    where: { status: "PENDING_APPROVAL" },
+    include: {
+      lead: {
+        include: {
+          company: true,
+          contact: true
+        }
+      },
+      campaign: true
+    },
+    orderBy: [
+      { lead: { score: "desc" } },
+      { createdAt: "asc" }
+    ],
+    take: limit
+  });
+
+  return reply.send({
+    count: rows.length,
+    rows: rows.map(row => ({
+      messageId: row.id,
+      channel: row.channel,
+      subject: row.subject,
+      body: row.body,
+      campaign: row.campaign ? {
+        id: row.campaign.id,
+        name: row.campaign.name,
+        active: row.campaign.active
+      } : null,
+      lead: {
+        id: row.lead.id,
+        score: row.lead.score,
+        grade: row.lead.grade,
+        status: row.lead.status
+      },
+      company: {
+        name: row.lead.company.name,
+        domain: row.lead.company.domain
+      },
+      contact: row.lead.contact ? {
+        fullName: row.lead.contact.fullName,
+        position: row.lead.contact.position,
+        email: row.lead.contact.email,
+        phone: row.lead.contact.phone,
+        whatsapp: row.lead.contact.whatsapp,
+        telegram: row.lead.contact.telegram,
+        verified: row.lead.contact.verified
+      } : null
+    }))
+  });
+});
+
+app.post("/v1/outreach/approve", async (request, reply) => {
+  const body = request.body as { messageIds?: string[] };
+  const messageIds = Array.from(new Set(body.messageIds || [])).filter(Boolean);
+
+  if (!messageIds.length) {
+    return reply.code(400).send({ error: "MESSAGE_IDS_REQUIRED" });
+  }
+
+  const rows = await db.outreachMessage.findMany({
+    where: { id: { in: messageIds } },
+    include: {
+      lead: true,
+      campaign: true
+    }
+  });
+
+  const invalid = rows.filter(row =>
+    row.status !== "PENDING_APPROVAL" ||
+    ["LOST", "DO_NOT_CONTACT", "WON"].includes(row.lead.status)
+  );
+
+  if (rows.length !== messageIds.length || invalid.length) {
+    return reply.code(409).send({
+      error: "MESSAGE_NOT_APPROVABLE",
+      found: rows.length,
+      requested: messageIds.length,
+      invalid: invalid.map(row => ({
+        messageId: row.id,
+        messageStatus: row.status,
+        leadStatus: row.lead.status
+      }))
+    });
+  }
+
+  await db.$transaction(async tx => {
+    await tx.outreachMessage.updateMany({
+      where: { id: { in: messageIds }, status: "PENDING_APPROVAL" },
+      data: { status: "QUEUED" }
+    });
+
+    for (const row of rows) {
+      await tx.activity.create({
+        data: {
+          leadId: row.leadId,
+          type: "OUTREACH_APPROVED",
+          payload: {
+            messageId: row.id,
+            channel: row.channel,
+            campaignId: row.campaignId,
+            campaignActive: row.campaign?.active ?? null
+          }
+        }
+      });
+    }
+  });
+
+  return reply.send({
+    approved: rows.length,
+    status: "QUEUED",
+    note: "Approval does not itself send the message."
+  });
+});
+
+app.post("/v1/outreach/mark-sent", async (request, reply) => {
+  const body = request.body as {
+    messageId?: string;
+    providerId?: string;
+    sentAt?: string;
+  };
+
+  if (!body.messageId) {
+    return reply.code(400).send({ error: "MESSAGE_ID_REQUIRED" });
+  }
+
+  const message = await db.outreachMessage.findUnique({
+    where: { id: body.messageId },
+    include: { lead: true }
+  });
+
+  if (!message) {
+    return reply.code(404).send({ error: "MESSAGE_NOT_FOUND" });
+  }
+
+  if (!["QUEUED", "SENT"].includes(message.status)) {
+    return reply.code(409).send({
+      error: "MESSAGE_NOT_READY_TO_MARK_SENT",
+      status: message.status
+    });
+  }
+
+  const sentAt = body.sentAt ? new Date(body.sentAt) : new Date();
+  if (Number.isNaN(sentAt.getTime())) {
+    return reply.code(400).send({ error: "INVALID_SENT_AT" });
+  }
+
+  await db.$transaction(async tx => {
+    await tx.outreachMessage.update({
+      where: { id: message.id },
+      data: {
+        status: "SENT",
+        providerId: body.providerId,
+        sentAt,
+        error: null
+      }
+    });
+
+    await tx.lead.update({
+      where: { id: message.leadId },
+      data: {
+        status: message.lead.status === "QUALIFIED" ? "CONTACTED" : message.lead.status,
+        firstContactAt: message.lead.firstContactAt || sentAt,
+        lastContactAt: sentAt
+      }
+    });
+
+    await tx.activity.create({
+      data: {
+        leadId: message.leadId,
+        type: "OUTREACH_SENT",
+        payload: {
+          messageId: message.id,
+          channel: message.channel,
+          providerId: body.providerId || null,
+          sentAt: sentAt.toISOString()
+        }
+      }
+    });
+  });
+
+  const followup = await scheduleNextFollowup(message.leadId);
+
+  return reply.send({
+    messageId: message.id,
+    status: "SENT",
+    sentAt,
+    followup
+  });
 });
 
 app.get("/v1/followups/due", async (request, reply) => {
