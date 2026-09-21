@@ -283,7 +283,49 @@ app.setErrorHandler((error, _request, reply) => {
   });
 });
 
-app.listen({ port: env.PORT, host: "0.0.0.0" }).catch((error) => {
-  app.log.error(error);
-  process.exit(1);
-});
+app.listen({ port: env.PORT, host: "0.0.0.0" })
+  .then(async () => {
+    if (!env.BOOTSTRAP_COLLECTION_JSON) return;
+
+    try {
+      const input = JSON.parse(env.BOOTSTRAP_COLLECTION_JSON) as {
+        provider: "tavily" | "serper";
+        country: string;
+        industry: string;
+        businessType?: string;
+        keywords?: string[];
+        limit?: number;
+      };
+
+      app.log.info({ input }, "bootstrap collection started");
+
+      const result = await collectEnrichAndIngest(
+        {
+          TAVILY_API_KEY: env.TAVILY_API_KEY,
+          SERPER_API_KEY: env.SERPER_API_KEY
+        },
+        input
+      );
+
+      app.log.info(
+        {
+          provider: result.provider,
+          collected: result.collected,
+          unique: result.unique,
+          enriched: result.enriched,
+          failedEnrichment: result.failedEnrichment,
+          ingestion: result.ingestion
+        },
+        "bootstrap collection completed"
+      );
+    } catch (error) {
+      app.log.error(
+        error instanceof Error ? error : new Error("bootstrap collection failed"),
+        "bootstrap collection failed"
+      );
+    }
+  })
+  .catch((error) => {
+    app.log.error(error);
+    process.exit(1);
+  });
