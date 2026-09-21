@@ -29,6 +29,7 @@ function hostname(url?: string) {
 
 const EXCLUDED_DOMAINS = [
   "vk.com",
+  "vk.ru",
   "2gis.ru",
   "2gis.com",
   "avito.ru",
@@ -41,7 +42,14 @@ const EXCLUDED_DOMAINS = [
   "instagram.com",
   "facebook.com",
   "t.me",
-  "telegram.me"
+  "telegram.me",
+  "lenta.ru",
+  "gazeta.ru",
+  "ispravochnik.com",
+  "partnersearch.ru",
+  "abreview.ru",
+  "cto-expo.ru",
+  "econbull-icsras.ru"
 ];
 
 function isExcludedDomain(domain?: string) {
