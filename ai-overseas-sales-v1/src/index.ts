@@ -11,6 +11,7 @@ import { handleReply } from "./services/reply-handler.js";
 import { getDueFollowups } from "./services/followup.js";
 import { ingestLeadBatch } from "./services/bulk-ingestion.js";
 import { databaseHealth } from "./services/system-health.js";
+import { db } from "./db.js";
 import { previewCollection, collectAndIngest } from "./services/collector-pipeline.js";
 import { collectEnrichAndIngest } from "./services/enriched-collector.js";
 import { enrichFromWebsite } from "./services/site-enrichment.js";
@@ -136,6 +137,75 @@ app.post("/v1/collect/ingest", async (request, reply) => {
   );
 
   return reply.code(201).send(result);
+});
+
+app.get("/v1/leads", async (request, reply) => {
+  const query = request.query as {
+    country?: string;
+    grade?: "A" | "B" | "C" | "D";
+    limit?: string;
+  };
+
+  const limit = Math.max(1, Math.min(Number(query.limit || 50), 200));
+
+  const rows = await db.lead.findMany({
+    where: {
+      ...(query.grade ? { grade: query.grade } : {}),
+      ...(query.country
+        ? {
+            company: {
+              country: {
+                equals: query.country,
+                mode: "insensitive"
+              }
+            }
+          }
+        : {})
+    },
+    include: {
+      company: true,
+      contact: true
+    },
+    orderBy: [
+      { score: "desc" },
+      { updatedAt: "desc" }
+    ],
+    take: limit
+  });
+
+  return reply.send({
+    count: rows.length,
+    rows: rows.map(row => ({
+      leadId: row.id,
+      score: row.score,
+      grade: row.grade,
+      status: row.status,
+      company: {
+        name: row.company.name,
+        website: row.company.website,
+        domain: row.company.domain,
+        country: row.company.country,
+        city: row.company.city,
+        industry: row.company.industry,
+        businessType: row.company.businessType,
+        source: row.company.source,
+        sourceUrl: row.company.sourceUrl
+      },
+      contact: row.contact
+        ? {
+            fullName: row.contact.fullName,
+            position: row.contact.position,
+            email: row.contact.email,
+            phone: row.contact.phone,
+            whatsapp: row.contact.whatsapp,
+            telegram: row.contact.telegram,
+            linkedin: row.contact.linkedin,
+            language: row.contact.language,
+            verified: row.contact.verified
+          }
+        : null
+    }))
+  });
 });
 
 app.post("/v1/score-preview", async (request, reply) => {
