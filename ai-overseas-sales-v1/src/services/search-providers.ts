@@ -49,23 +49,32 @@ function isExcludedDomain(domain?: string) {
   return EXCLUDED_DOMAINS.some(x => domain === x || domain.endsWith(`.${x}`));
 }
 
+const GENERIC_TITLE_RE = /(forum|форум|новост|стать|поиск|тег|каталог|купить авто|автомобили с пробегом|подержанные автомобили|used cars)/i;
+
+function brandFromDomain(domain?: string) {
+  if (!domain) return "Unknown Company";
+  const root = domain.split(".")[0] || domain;
+  return root
+    .split(/[-_]/g)
+    .filter(Boolean)
+    .map(x => x.charAt(0).toUpperCase() + x.slice(1))
+    .join(" ");
+}
+
 function companyNameFromResult(result: SearchResult) {
+  const domain = hostname(result.url);
   const titleName = result.title?.split(/[|–—]/)[0]?.trim();
-  if (titleName && titleName.length >= 2 && titleName.length <= 80) {
+
+  if (
+    titleName &&
+    titleName.length >= 2 &&
+    titleName.length <= 60 &&
+    !GENERIC_TITLE_RE.test(titleName)
+  ) {
     return titleName;
   }
 
-  const host = hostname(result.url);
-  if (host) {
-    const root = host.split(".")[0] || host;
-    return root
-      .split(/[-_]/g)
-      .filter(Boolean)
-      .map(x => x.charAt(0).toUpperCase() + x.slice(1))
-      .join(" ");
-  }
-
-  return "Unknown Company";
+  return brandFromDomain(domain);
 }
 
 function toRawLead(
@@ -78,9 +87,19 @@ function toRawLead(
   const domain = hostname(result.url);
   if (!domain || isExcludedDomain(domain)) return null;
 
+  const text = `${result.title || ""} ${result.snippet || result.content || ""}`;
+  if (/(forum|форум|новост|стать|поиск по тегам|блог|обзор|википед)/i.test(text)) {
+    return null;
+  }
+
+  let website = result.url;
+  try {
+    website = new URL(result.url).origin + "/";
+  } catch {}
+
   return {
     companyName: companyNameFromResult(result),
-    website: result.url,
+    website,
     domain,
     country: input.country,
     industry: input.industry,
@@ -213,37 +232,54 @@ export async function collectWithSerpApi(
   input: SearchCollectorInput
 ): Promise<RawLead[]> {
   const limit = Math.max(1, Math.min(input.limit ?? 20, 100));
-  const params = new URLSearchParams({
-    engine: "google",
-    q: buildQuery(input),
-    api_key: apiKey,
-    num: String(limit),
-    gl: input.country.toLowerCase() === "russia" ? "ru" : "us",
-    hl: input.country.toLowerCase() === "russia" ? "ru" : "en"
-  });
+  const baseKeywords = (input.keywords || []).filter(Boolean);
 
-  const res = await fetch(`https://serpapi.com/search.json?${params.toString()}`);
+  const queries = baseKeywords.length
+    ? baseKeywords.slice(0, Math.min(6, Math.ceil(limit / 5))).map(k =>
+        `${input.country} ${input.industry} "${k}"`
+      )
+    : [buildQuery(input)];
 
-  if (!res.ok) {
-    const detail = (await res.text()).slice(0, 500);
-    throw new Error(`SERPAPI_SEARCH_FAILED_${res.status}: ${detail}`);
-  }
+  const collected: RawLead[] = [];
 
-  const data = await res.json() as {
-    organic_results?: Array<{ title?: string; link?: string; snippet?: string }>;
-  };
+  for (const q of queries) {
+    const params = new URLSearchParams({
+      engine: "google",
+      q,
+      api_key: apiKey,
+      num: String(Math.min(10, limit)),
+      gl: input.country.toLowerCase() === "russia" ? "ru" : "us",
+      hl: input.country.toLowerCase() === "russia" ? "ru" : "en"
+    });
 
-  return (data.organic_results || [])
-    .map(r =>
-      toRawLead(
-        {
-          title: r.title,
-          url: r.link,
-          snippet: r.snippet
-        },
+    const res = await fetch(`https://serpapi.com/search.json?${params.toString()}`);
+
+    if (!res.ok) {
+      const detail = (await res.text()).slice(0, 500);
+      throw new Error(`SERPAPI_SEARCH_FAILED_${res.status}: ${detail}`);
+    }
+
+    const data = await res.json() as {
+      organic_results?: Array<{ title?: string; link?: string; snippet?: string }>;
+    };
+
+    for (const r of data.organic_results || []) {
+      const lead = toRawLead(
+        { title: r.title, url: r.link, snippet: r.snippet },
         input,
         "serpapi"
-      )
-    )
-    .filter((x): x is RawLead => Boolean(x));
+      );
+      if (!lead) continue;
+
+      if (!collected.some(x => x.domain === lead.domain)) {
+        collected.push(lead);
+      }
+
+      if (collected.length >= limit) break;
+    }
+
+    if (collected.length >= limit) break;
+  }
+
+  return collected.slice(0, limit);
 }
