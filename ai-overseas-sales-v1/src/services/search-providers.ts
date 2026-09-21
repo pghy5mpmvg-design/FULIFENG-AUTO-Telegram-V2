@@ -123,7 +123,8 @@ export async function collectWithSerper(
   });
 
   if (!res.ok) {
-    throw new Error(`SERPER_SEARCH_FAILED_${res.status}`);
+    const detail = (await res.text()).slice(0, 500);
+    throw new Error(`SERPER_SEARCH_FAILED_${res.status}: ${detail}`);
   }
 
   const data = await res.json() as {
