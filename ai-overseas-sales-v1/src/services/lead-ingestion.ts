@@ -86,20 +86,41 @@ export async function ingestLead(lead: EnrichedLead) {
 
   const scored = estimateScore(lead);
 
-  const salesLead = await db.lead.create({
-    data: {
+  const existingLead = await db.lead.findFirst({
+    where: {
       companyId: company.id,
-      contactId: contact?.id,
-      score: scored.score,
-      grade: scored.grade,
-      status: scored.score >= 60 ? "QUALIFIED" : "NEW",
-      reason: JSON.stringify({
-        scoreBreakdown: scored.breakdown,
-        dedupeKeys: keys,
-        enrichmentNotes: lead.enrichmentNotes || []
-      })
-    }
+      contactId: contact?.id ?? null,
+      status: { notIn: ["LOST"] }
+    },
+    orderBy: { createdAt: "desc" }
   });
 
-  return { company, contact, lead: salesLead, score: scored };
+  const reason = JSON.stringify({
+    scoreBreakdown: scored.breakdown,
+    dedupeKeys: keys,
+    enrichmentNotes: lead.enrichmentNotes || []
+  });
+
+  const salesLead = existingLead
+    ? await db.lead.update({
+        where: { id: existingLead.id },
+        data: {
+          score: scored.score,
+          grade: scored.grade,
+          status: scored.score >= 60 ? "QUALIFIED" : existingLead.status,
+          reason
+        }
+      })
+    : await db.lead.create({
+        data: {
+          companyId: company.id,
+          contactId: contact?.id,
+          score: scored.score,
+          grade: scored.grade,
+          status: scored.score >= 60 ? "QUALIFIED" : "NEW",
+          reason
+        }
+      });
+
+  return { company, contact, lead: salesLead, score: scored, deduped: Boolean(existingLead) };
 }
