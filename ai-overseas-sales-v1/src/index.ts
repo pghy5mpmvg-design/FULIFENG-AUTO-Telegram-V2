@@ -12,6 +12,7 @@ import { getDueFollowups } from "./services/followup.js";
 import { ingestLeadBatch } from "./services/bulk-ingestion.js";
 import { databaseHealth } from "./services/system-health.js";
 import { previewCollection, collectAndIngest } from "./services/collector-pipeline.js";
+import { collectEnrichAndIngest } from "./services/enriched-collector.js";
 
 const app = Fastify({ logger: true });
 const enrichment = new BasicEnrichmentProvider();
@@ -63,6 +64,40 @@ app.post("/v1/collect/preview", async (request, reply) => {
   );
 
   return reply.send(result);
+});
+
+app.post("/v1/collect/full", async (request, reply) => {
+  const body = request.body as {
+    provider?: "tavily" | "serper";
+    country?: string;
+    industry?: string;
+    businessType?: string;
+    keywords?: string[];
+    limit?: number;
+  };
+
+  if (!body.provider || !body.country || !body.industry) {
+    return reply.code(400).send({
+      error: "PROVIDER_COUNTRY_INDUSTRY_REQUIRED"
+    });
+  }
+
+  const result = await collectEnrichAndIngest(
+    {
+      TAVILY_API_KEY: env.TAVILY_API_KEY,
+      SERPER_API_KEY: env.SERPER_API_KEY
+    },
+    {
+      provider: body.provider,
+      country: body.country,
+      industry: body.industry,
+      businessType: body.businessType,
+      keywords: body.keywords,
+      limit: body.limit
+    }
+  );
+
+  return reply.code(201).send(result);
 });
 
 app.post("/v1/collect/ingest", async (request, reply) => {
