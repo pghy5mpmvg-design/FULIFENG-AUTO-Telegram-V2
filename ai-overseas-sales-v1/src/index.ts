@@ -361,6 +361,58 @@ app.listen({ port: env.PORT, host: "0.0.0.0" })
   .then(async () => {
     app.log.info({ hasBootstrapCollection: Boolean(env.BOOTSTRAP_COLLECTION_JSON), hasBootstrapRaw: Boolean(env.BOOTSTRAP_RAW_LEADS_JSON) }, "bootstrap env status");
 
+    if (env.LOG_LEADS_COUNTRY) {
+      try {
+        const rows = await db.lead.findMany({
+          where: {
+            company: {
+              country: {
+                equals: env.LOG_LEADS_COUNTRY,
+                mode: "insensitive"
+              }
+            }
+          },
+          include: {
+            company: true,
+            contact: true
+          },
+          orderBy: [
+            { score: "desc" },
+            { updatedAt: "desc" }
+          ],
+          take: 100
+        });
+
+        app.log.info({
+          country: env.LOG_LEADS_COUNTRY,
+          count: rows.length,
+          rows: rows.map(row => ({
+            leadId: row.id,
+            companyName: row.company.name,
+            website: row.company.website,
+            domain: row.company.domain,
+            score: row.score,
+            grade: row.grade,
+            status: row.status,
+            contact: row.contact ? {
+              email: row.contact.email,
+              phone: row.contact.phone,
+              whatsapp: row.contact.whatsapp,
+              telegram: row.contact.telegram,
+              linkedin: row.contact.linkedin,
+              fullName: row.contact.fullName,
+              position: row.contact.position
+            } : null
+          }))
+        }, "crm lead snapshot");
+      } catch (error) {
+        app.log.error(
+          error instanceof Error ? error : new Error("crm snapshot failed"),
+          "crm snapshot failed"
+        );
+      }
+    }
+
     if (env.BOOTSTRAP_COLLECTION_JSON) {
       try {
         const parsed = JSON.parse(env.BOOTSTRAP_COLLECTION_JSON) as {
