@@ -6,6 +6,7 @@ const EnvSchema = z.object({
   DATABASE_URL: z.string().min(1),
   TAVILY_API_KEY: z.string().optional(),
   SERPER_API_KEY: z.string().optional(),
+  SERPAPI_API_KEY: z.string().optional(),
   BOOTSTRAP_COLLECTION_JSON: z.string().optional(),
   BOOTSTRAP_RAW_LEADS_JSON: z.string().optional(),
   OUTREACH_DAILY_LIMIT: z.coerce.number().int().positive().default(40),
