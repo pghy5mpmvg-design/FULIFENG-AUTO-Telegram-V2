@@ -208,6 +208,93 @@ app.get("/v1/leads", async (request, reply) => {
   });
 });
 
+app.get("/v1/leads/clean", async (request, reply) => {
+  const query = request.query as {
+    country?: string;
+    limit?: string;
+  };
+
+  const limit = Math.max(1, Math.min(Number(query.limit || 50), 200));
+  const excludedDomains = [
+    "vk.com","vk.ru","2gis.ru","2gis.com","avito.ru","auto.ru","drom.ru",
+    "yandex.ru","google.com","wikipedia.org","youtube.com","instagram.com",
+    "facebook.com","t.me","telegram.me","lenta.ru","gazeta.ru",
+    "ispravochnik.com","partnersearch.ru","abreview.ru","cto-expo.ru",
+    "econbull-icsras.ru"
+  ];
+
+  const rows = await db.lead.findMany({
+    where: query.country
+      ? {
+          company: {
+            country: {
+              equals: query.country,
+              mode: "insensitive"
+            }
+          }
+        }
+      : undefined,
+    include: {
+      company: true,
+      contact: true
+    },
+    orderBy: [
+      { score: "desc" },
+      { updatedAt: "desc" }
+    ],
+    take: 500
+  });
+
+  const seen = new Set<string>();
+  const clean = [];
+
+  for (const row of rows) {
+    const domain = (row.company.domain || "").toLowerCase();
+    if (!domain) continue;
+    if (excludedDomains.some(x => domain === x || domain.endsWith(`.${x}`))) continue;
+    if (seen.has(domain)) continue;
+    seen.add(domain);
+
+    const contact = row.contact;
+    const channels = [
+      contact?.email,
+      contact?.phone,
+      contact?.whatsapp,
+      contact?.telegram,
+      contact?.linkedin
+    ].filter(Boolean).length;
+
+    clean.push({
+      leadId: row.id,
+      companyName: row.company.name,
+      website: row.company.website,
+      domain,
+      score: row.score,
+      grade: row.grade,
+      status: row.status,
+      contactCompleteness: channels,
+      contact: contact
+        ? {
+            email: contact.email,
+            phone: contact.phone,
+            whatsapp: contact.whatsapp,
+            telegram: contact.telegram,
+            linkedin: contact.linkedin,
+            fullName: contact.fullName,
+            position: contact.position
+          }
+        : null
+    });
+
+    if (clean.length >= limit) break;
+  }
+
+  return reply.send({
+    count: clean.length,
+    rows: clean
+  });
+});
+
 app.post("/v1/score-preview", async (request, reply) => {
   const body = request.body as Record<string, unknown>;
   return reply.send(scoreLead(body));
