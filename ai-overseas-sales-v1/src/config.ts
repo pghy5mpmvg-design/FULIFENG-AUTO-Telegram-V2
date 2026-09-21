@@ -7,6 +7,7 @@ const EnvSchema = z.object({
   TAVILY_API_KEY: z.string().optional(),
   SERPER_API_KEY: z.string().optional(),
   BOOTSTRAP_COLLECTION_JSON: z.string().optional(),
+  BOOTSTRAP_RAW_LEADS_JSON: z.string().optional(),
   OUTREACH_DAILY_LIMIT: z.coerce.number().int().positive().default(40),
   OUTREACH_MIN_DELAY_SECONDS: z.coerce.number().int().nonnegative().default(90),
   OUTREACH_MAX_DELAY_SECONDS: z.coerce.number().int().positive().default(240)
