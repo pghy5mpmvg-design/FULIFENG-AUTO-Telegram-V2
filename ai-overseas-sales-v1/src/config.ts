@@ -10,6 +10,8 @@ const EnvSchema = z.object({
   BOOTSTRAP_COLLECTION_JSON: z.string().optional(),
   BOOTSTRAP_RAW_LEADS_JSON: z.string().optional(),
   LOG_LEADS_COUNTRY: z.string().optional(),
+  NEON_DATABASE_URL: z.string().optional(),
+  MIGRATE_TO_NEON: z.string().optional(),
   OUTREACH_DAILY_LIMIT: z.coerce.number().int().positive().default(40),
   OUTREACH_MIN_DELAY_SECONDS: z.coerce.number().int().nonnegative().default(90),
   OUTREACH_MAX_DELAY_SECONDS: z.coerce.number().int().positive().default(240)
