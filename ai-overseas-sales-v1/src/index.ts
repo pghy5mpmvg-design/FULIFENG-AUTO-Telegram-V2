@@ -9,6 +9,8 @@ import { classifyReply } from "./services/reply-classifier.js";
 import { prepareFirstTouch } from "./services/outreach-service.js";
 import { handleReply } from "./services/reply-handler.js";
 import { getDueFollowups } from "./services/followup.js";
+import { ingestLeadBatch } from "./services/bulk-ingestion.js";
+import { databaseHealth } from "./services/system-health.js";
 
 const app = Fastify({ logger: true });
 const enrichment = new BasicEnrichmentProvider();
@@ -16,8 +18,17 @@ const enrichment = new BasicEnrichmentProvider();
 app.get("/health", async () => ({
   ok: true,
   service: "ai-overseas-sales-engine-v1",
-  version: "0.3.0"
+  version: "0.4.0"
 }));
+
+app.get("/health/db", async (_request, reply) => {
+  const dbStatus = await databaseHealth();
+  return reply.send({
+    ok: true,
+    service: "ai-overseas-sales-engine-v1",
+    ...dbStatus
+  });
+});
 
 app.post("/v1/score-preview", async (request, reply) => {
   const body = request.body as Record<string, unknown>;
@@ -37,6 +48,28 @@ app.post("/v1/leads/preview", async (request, reply) => {
   const message = generateFirstTouch({ lead: enriched });
 
   return reply.send({ enriched, message });
+});
+
+app.post("/v1/leads/bulk-ingest", async (request, reply) => {
+  const body = request.body as unknown;
+  if (!Array.isArray(body)) {
+    return reply.code(400).send({ error: "ARRAY_REQUIRED" });
+  }
+
+  const rows = [];
+  for (const item of body) {
+    const parsed = RawLeadSchema.safeParse(item);
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error: "INVALID_LEAD_IN_BATCH",
+        details: parsed.error.flatten()
+      });
+    }
+    rows.push(parsed.data);
+  }
+
+  const result = await ingestLeadBatch(rows);
+  return reply.code(201).send(result);
 });
 
 app.post("/v1/leads/ingest", async (request, reply) => {
