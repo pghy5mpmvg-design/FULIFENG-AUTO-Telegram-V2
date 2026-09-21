@@ -1,7 +1,8 @@
 import type { RawLead } from "../types/lead.js";
 
 const EMAIL_RE = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
-const PHONE_RE = /(?:\+?\d[\d\s().-]{7,}\d)/g;
+const TEL_HREF_RE = /href=["']tel:([^"'?#]+)["']/gi;
+const PHONE_RE = /\+\d[\d\s().-]{8,}\d/g;
 const TG_RE = /https?:\/\/(?:t\.me|telegram\.me)\/[A-Za-z0-9_+-]+/gi;
 const LI_RE = /https?:\/\/(?:[a-z]+\.)?linkedin\.com\/[^"'\s<>]+/gi;
 const WA_RE = /https?:\/\/(?:wa\.me|api\.whatsapp\.com)\/[^"'\s<>]+/gi;
@@ -19,6 +20,33 @@ function safeHttpUrl(value?: string) {
 
 function unique<T>(items: T[]) {
   return [...new Set(items)];
+}
+
+function validEmail(value: string) {
+  const lower = value.toLowerCase();
+  if (/@(?:2x|3x)\./i.test(lower)) return false;
+  if (/\.(?:png|jpg|jpeg|gif|svg|webp)$/i.test(lower)) return false;
+  return /^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i.test(value);
+}
+
+function normalizePhone(value: string) {
+  const raw = value.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return null;
+
+  const digits = raw.replace(/\D/g, "");
+  if (digits.length < 10 || digits.length > 15) return null;
+
+  if (/^(19|20)\d{6,}$/.test(digits)) return null;
+
+  return raw;
+}
+
+function extractTelHrefs(html: string) {
+  const values: string[] = [];
+  for (const match of html.matchAll(TEL_HREF_RE)) {
+    if (match[1]) values.push(match[1]);
+  }
+  return values;
 }
 
 function stripHtml(html: string) {
@@ -79,8 +107,16 @@ export async function enrichFromWebsite(lead: RawLead) {
 
     const html = (await res.text()).slice(0, 500_000);
     const text = stripHtml(html).slice(0, 6000);
-    const emails = unique(html.match(EMAIL_RE) || []).slice(0, 5);
-    const phones = unique(html.match(PHONE_RE) || []).slice(0, 5);
+    const emails = unique(html.match(EMAIL_RE) || [])
+      .filter(validEmail)
+      .slice(0, 5);
+
+    const telPhones = extractTelHrefs(html);
+    const fallbackPhones = html.match(PHONE_RE) || [];
+    const phones = unique([...telPhones, ...fallbackPhones])
+      .map(normalizePhone)
+      .filter((x): x is string => Boolean(x))
+      .slice(0, 5);
     const telegram = unique(html.match(TG_RE) || []).slice(0, 3);
     const linkedin = unique(html.match(LI_RE) || []).slice(0, 3);
     const whatsapp = unique(html.match(WA_RE) || []).slice(0, 3);
