@@ -240,41 +240,58 @@ export async function collectWithSerpApi(
       )
     : [buildQuery(input)];
 
+  const queryTasks = queries.map(async (q) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 12_000);
+
+    try {
+      const params = new URLSearchParams({
+        engine: "google",
+        q,
+        api_key: apiKey,
+        num: String(Math.min(10, limit)),
+        gl: input.country.toLowerCase() === "russia" ? "ru" : "us",
+        hl: input.country.toLowerCase() === "russia" ? "ru" : "en"
+      });
+
+      const res = await fetch(
+        `https://serpapi.com/search.json?${params.toString()}`,
+        { signal: controller.signal }
+      );
+
+      if (!res.ok) {
+        const detail = (await res.text()).slice(0, 500);
+        throw new Error(`SERPAPI_SEARCH_FAILED_${res.status}: ${detail}`);
+      }
+
+      const data = await res.json() as {
+        organic_results?: Array<{ title?: string; link?: string; snippet?: string }>;
+      };
+
+      return (data.organic_results || [])
+        .map(r =>
+          toRawLead(
+            { title: r.title, url: r.link, snippet: r.snippet },
+            input,
+            "serpapi"
+          )
+        )
+        .filter((x): x is RawLead => Boolean(x));
+    } finally {
+      clearTimeout(timer);
+    }
+  });
+
+  const settled = await Promise.allSettled(queryTasks);
   const collected: RawLead[] = [];
 
-  for (const q of queries) {
-    const params = new URLSearchParams({
-      engine: "google",
-      q,
-      api_key: apiKey,
-      num: String(Math.min(10, limit)),
-      gl: input.country.toLowerCase() === "russia" ? "ru" : "us",
-      hl: input.country.toLowerCase() === "russia" ? "ru" : "en"
-    });
+  for (const result of settled) {
+    if (result.status !== "fulfilled") continue;
 
-    const res = await fetch(`https://serpapi.com/search.json?${params.toString()}`);
-
-    if (!res.ok) {
-      const detail = (await res.text()).slice(0, 500);
-      throw new Error(`SERPAPI_SEARCH_FAILED_${res.status}: ${detail}`);
-    }
-
-    const data = await res.json() as {
-      organic_results?: Array<{ title?: string; link?: string; snippet?: string }>;
-    };
-
-    for (const r of data.organic_results || []) {
-      const lead = toRawLead(
-        { title: r.title, url: r.link, snippet: r.snippet },
-        input,
-        "serpapi"
-      );
-      if (!lead) continue;
-
+    for (const lead of result.value) {
       if (!collected.some(x => x.domain === lead.domain)) {
         collected.push(lead);
       }
-
       if (collected.length >= limit) break;
     }
 
