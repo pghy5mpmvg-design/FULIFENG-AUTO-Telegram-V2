@@ -13,6 +13,7 @@ import { ingestLeadBatch } from "./services/bulk-ingestion.js";
 import { databaseHealth } from "./services/system-health.js";
 import { previewCollection, collectAndIngest } from "./services/collector-pipeline.js";
 import { collectEnrichAndIngest } from "./services/enriched-collector.js";
+import { enrichFromWebsite } from "./services/site-enrichment.js";
 
 const app = Fastify({ logger: true });
 const enrichment = new BasicEnrichmentProvider();
@@ -285,44 +286,83 @@ app.setErrorHandler((error, _request, reply) => {
 
 app.listen({ port: env.PORT, host: "0.0.0.0" })
   .then(async () => {
-    if (!env.BOOTSTRAP_COLLECTION_JSON) return;
+    if (env.BOOTSTRAP_COLLECTION_JSON) {
+      try {
+        const parsed = JSON.parse(env.BOOTSTRAP_COLLECTION_JSON) as {
+          disabled?: boolean;
+          provider?: "tavily" | "serper";
+          country?: string;
+          industry?: string;
+          businessType?: string;
+          keywords?: string[];
+          limit?: number;
+        };
 
-    try {
-      const input = JSON.parse(env.BOOTSTRAP_COLLECTION_JSON) as {
-        provider: "tavily" | "serper";
-        country: string;
-        industry: string;
-        businessType?: string;
-        keywords?: string[];
-        limit?: number;
-      };
+        if (!parsed.disabled && parsed.provider && parsed.country && parsed.industry) {
+          app.log.info({ input: parsed }, "bootstrap collection started");
 
-      app.log.info({ input }, "bootstrap collection started");
+          const result = await collectEnrichAndIngest(
+            {
+              TAVILY_API_KEY: env.TAVILY_API_KEY,
+              SERPER_API_KEY: env.SERPER_API_KEY
+            },
+            {
+              provider: parsed.provider,
+              country: parsed.country,
+              industry: parsed.industry,
+              businessType: parsed.businessType,
+              keywords: parsed.keywords,
+              limit: parsed.limit
+            }
+          );
 
-      const result = await collectEnrichAndIngest(
-        {
-          TAVILY_API_KEY: env.TAVILY_API_KEY,
-          SERPER_API_KEY: env.SERPER_API_KEY
-        },
-        input
-      );
+          app.log.info(
+            {
+              provider: result.provider,
+              collected: result.collected,
+              unique: result.unique,
+              enriched: result.enriched,
+              failedEnrichment: result.failedEnrichment,
+              ingestion: result.ingestion
+            },
+            "bootstrap collection completed"
+          );
+        }
+      } catch (error) {
+        app.log.error(
+          error instanceof Error ? error : new Error("bootstrap collection failed"),
+          "bootstrap collection failed"
+        );
+      }
+    }
 
-      app.log.info(
-        {
-          provider: result.provider,
-          collected: result.collected,
-          unique: result.unique,
-          enriched: result.enriched,
-          failedEnrichment: result.failedEnrichment,
-          ingestion: result.ingestion
-        },
-        "bootstrap collection completed"
-      );
-    } catch (error) {
-      app.log.error(
-        error instanceof Error ? error : new Error("bootstrap collection failed"),
-        "bootstrap collection failed"
-      );
+    if (env.BOOTSTRAP_RAW_LEADS_JSON) {
+      try {
+        const rows = JSON.parse(env.BOOTSTRAP_RAW_LEADS_JSON) as Array<{
+          companyName: string;
+          website?: string;
+          country?: string;
+          city?: string;
+          industry?: string;
+          businessType?: string;
+          source?: string;
+          sourceUrl?: string;
+        }>;
+
+        const enrichedRows = [];
+        for (const row of rows) {
+          const enriched = await enrichFromWebsite(row);
+          enrichedRows.push(enriched.lead);
+        }
+
+        const ingestion = await ingestLeadBatch(enrichedRows);
+        app.log.info({ ingestion }, "bootstrap raw leads completed");
+      } catch (error) {
+        app.log.error(
+          error instanceof Error ? error : new Error("bootstrap raw leads failed"),
+          "bootstrap raw leads failed"
+        );
+      }
     }
   })
   .catch((error) => {
