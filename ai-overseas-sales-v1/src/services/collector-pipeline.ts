@@ -31,7 +31,7 @@ function uniqueLeads(rows: RawLead[]) {
 }
 
 export async function previewCollection(
-  env: { TAVILY_API_KEY?: string; SERPER_API_KEY?: string },
+  env: { TAVILY_API_KEY?: string; SERPER_API_KEY?: string; SERPAPI_API_KEY?: string },
   input: SearchCollectorInput
 ) {
   const collected = await collectSearchLeads(env, input);
@@ -47,7 +47,7 @@ export async function previewCollection(
 }
 
 export async function collectAndIngest(
-  env: { TAVILY_API_KEY?: string; SERPER_API_KEY?: string },
+  env: { TAVILY_API_KEY?: string; SERPER_API_KEY?: string; SERPAPI_API_KEY?: string },
   input: SearchCollectorInput
 ) {
   const preview = await previewCollection(env, input);
