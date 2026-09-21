@@ -1,6 +1,6 @@
 import type { RawLead } from "../types/lead.js";
 
-export type SearchProviderName = "tavily" | "serper";
+export type SearchProviderName = "tavily" | "serper" | "serpapi";
 
 export type SearchCollectorInput = {
   provider: SearchProviderName;
@@ -150,6 +150,7 @@ export async function collectSearchLeads(
   env: {
     TAVILY_API_KEY?: string;
     SERPER_API_KEY?: string;
+    SERPAPI_API_KEY?: string;
   },
   input: SearchCollectorInput
 ) {
@@ -163,5 +164,51 @@ export async function collectSearchLeads(
     return collectWithSerper(env.SERPER_API_KEY, input);
   }
 
+  if (input.provider === "serpapi") {
+    if (!env.SERPAPI_API_KEY) throw new Error("SERPAPI_API_KEY_MISSING");
+    return collectWithSerpApi(env.SERPAPI_API_KEY, input);
+  }
+
   throw new Error("UNSUPPORTED_SEARCH_PROVIDER");
+}
+
+
+export async function collectWithSerpApi(
+  apiKey: string,
+  input: SearchCollectorInput
+): Promise<RawLead[]> {
+  const limit = Math.max(1, Math.min(input.limit ?? 20, 100));
+  const params = new URLSearchParams({
+    engine: "google",
+    q: buildQuery(input),
+    api_key: apiKey,
+    num: String(limit),
+    gl: input.country.toLowerCase() === "russia" ? "ru" : "us",
+    hl: input.country.toLowerCase() === "russia" ? "ru" : "en"
+  });
+
+  const res = await fetch(`https://serpapi.com/search.json?${params.toString()}`);
+
+  if (!res.ok) {
+    const detail = (await res.text()).slice(0, 500);
+    throw new Error(`SERPAPI_SEARCH_FAILED_${res.status}: ${detail}`);
+  }
+
+  const data = await res.json() as {
+    organic_results?: Array<{ title?: string; link?: string; snippet?: string }>;
+  };
+
+  return (data.organic_results || [])
+    .map(r =>
+      toRawLead(
+        {
+          title: r.title,
+          url: r.link,
+          snippet: r.snippet
+        },
+        input,
+        "serpapi"
+      )
+    )
+    .filter((x): x is RawLead => Boolean(x));
 }
