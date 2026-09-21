@@ -89,10 +89,12 @@ export async function ingestLead(lead: EnrichedLead) {
   const existingLead = await db.lead.findFirst({
     where: {
       companyId: company.id,
-      contactId: contact?.id ?? null,
       status: { notIn: ["LOST"] }
     },
-    orderBy: { createdAt: "desc" }
+    orderBy: [
+      { score: "desc" },
+      { createdAt: "desc" }
+    ]
   });
 
   const reason = JSON.stringify({
@@ -105,6 +107,7 @@ export async function ingestLead(lead: EnrichedLead) {
     ? await db.lead.update({
         where: { id: existingLead.id },
         data: {
+          contactId: contact?.id ?? existingLead.contactId,
           score: scored.score,
           grade: scored.grade,
           status: scored.score >= 60 ? "QUALIFIED" : existingLead.status,
