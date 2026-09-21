@@ -10,6 +10,8 @@ function clamp(value: number, max: number) {
   return Math.max(0, Math.min(max, Number.isFinite(value) ? value : 0));
 }
 
+export type LeadGradeValue = "A" | "B" | "C" | "D";
+
 export function scoreLead(input: Record<string, unknown>) {
   const data = input as LeadInput;
 
@@ -22,7 +24,7 @@ export function scoreLead(input: Record<string, unknown>) {
   };
 
   const score = Object.values(breakdown).reduce((sum, n) => sum + n, 0);
-  const grade = score >= 80 ? "A" : score >= 60 ? "B" : score >= 40 ? "C" : "D";
+  const grade: LeadGradeValue = score >= 80 ? "A" : score >= 60 ? "B" : score >= 40 ? "C" : "D";
 
   return { score, grade, breakdown };
 }
