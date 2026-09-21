@@ -35,7 +35,7 @@ app.get("/health/db", async (_request, reply) => {
 
 app.post("/v1/collect/preview", async (request, reply) => {
   const body = request.body as {
-    provider?: "tavily" | "serper";
+    provider?: "tavily" | "serper" | "serpapi";
     country?: string;
     industry?: string;
     businessType?: string;
@@ -52,7 +52,8 @@ app.post("/v1/collect/preview", async (request, reply) => {
   const result = await previewCollection(
     {
       TAVILY_API_KEY: env.TAVILY_API_KEY,
-      SERPER_API_KEY: env.SERPER_API_KEY
+      SERPER_API_KEY: env.SERPER_API_KEY,
+      SERPAPI_API_KEY: env.SERPAPI_API_KEY
     },
     {
       provider: body.provider,
@@ -69,7 +70,7 @@ app.post("/v1/collect/preview", async (request, reply) => {
 
 app.post("/v1/collect/full", async (request, reply) => {
   const body = request.body as {
-    provider?: "tavily" | "serper";
+    provider?: "tavily" | "serper" | "serpapi";
     country?: string;
     industry?: string;
     businessType?: string;
@@ -86,7 +87,8 @@ app.post("/v1/collect/full", async (request, reply) => {
   const result = await collectEnrichAndIngest(
     {
       TAVILY_API_KEY: env.TAVILY_API_KEY,
-      SERPER_API_KEY: env.SERPER_API_KEY
+      SERPER_API_KEY: env.SERPER_API_KEY,
+      SERPAPI_API_KEY: env.SERPAPI_API_KEY
     },
     {
       provider: body.provider,
@@ -103,7 +105,7 @@ app.post("/v1/collect/full", async (request, reply) => {
 
 app.post("/v1/collect/ingest", async (request, reply) => {
   const body = request.body as {
-    provider?: "tavily" | "serper";
+    provider?: "tavily" | "serper" | "serpapi";
     country?: string;
     industry?: string;
     businessType?: string;
@@ -120,7 +122,8 @@ app.post("/v1/collect/ingest", async (request, reply) => {
   const result = await collectAndIngest(
     {
       TAVILY_API_KEY: env.TAVILY_API_KEY,
-      SERPER_API_KEY: env.SERPER_API_KEY
+      SERPER_API_KEY: env.SERPER_API_KEY,
+      SERPAPI_API_KEY: env.SERPAPI_API_KEY
     },
     {
       provider: body.provider,
@@ -292,7 +295,7 @@ app.listen({ port: env.PORT, host: "0.0.0.0" })
       try {
         const parsed = JSON.parse(env.BOOTSTRAP_COLLECTION_JSON) as {
           disabled?: boolean;
-          provider?: "tavily" | "serper";
+          provider?: "tavily" | "serper" | "serpapi";
           country?: string;
           industry?: string;
           businessType?: string;
@@ -306,7 +309,8 @@ app.listen({ port: env.PORT, host: "0.0.0.0" })
           const result = await collectEnrichAndIngest(
             {
               TAVILY_API_KEY: env.TAVILY_API_KEY,
-              SERPER_API_KEY: env.SERPER_API_KEY
+              SERPER_API_KEY: env.SERPER_API_KEY,
+      SERPAPI_API_KEY: env.SERPAPI_API_KEY
             },
             {
               provider: parsed.provider,
