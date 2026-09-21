@@ -15,7 +15,7 @@ function domainFromWebsite(website?: string) {
 
 function estimateScore(lead: EnrichedLead) {
   const contact = lead.contact;
-  const hasDecisionRole = /owner|founder|director|purchas|procurement|buyer|general manager|ceo/i.test(contact?.position || "");
+  const hasDecisionRole = /owner|founder|director|purchas|procurement|buyer|general manager|ceo|директор|руководител|закуп|снабжен|владелец|генеральн/i.test(contact?.position || "");
 
   return scoreLead({
     companyMatch: lead.industry || lead.businessType ? 24 : 14,
