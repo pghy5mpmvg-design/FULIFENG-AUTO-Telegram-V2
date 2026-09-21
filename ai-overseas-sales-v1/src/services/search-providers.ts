@@ -27,7 +27,34 @@ function hostname(url?: string) {
   }
 }
 
+const EXCLUDED_DOMAINS = [
+  "vk.com",
+  "2gis.ru",
+  "2gis.com",
+  "avito.ru",
+  "auto.ru",
+  "drom.ru",
+  "yandex.ru",
+  "google.com",
+  "wikipedia.org",
+  "youtube.com",
+  "instagram.com",
+  "facebook.com",
+  "t.me",
+  "telegram.me"
+];
+
+function isExcludedDomain(domain?: string) {
+  if (!domain) return true;
+  return EXCLUDED_DOMAINS.some(x => domain === x || domain.endsWith(`.${x}`));
+}
+
 function companyNameFromResult(result: SearchResult) {
+  const titleName = result.title?.split(/[|–—]/)[0]?.trim();
+  if (titleName && titleName.length >= 2 && titleName.length <= 80) {
+    return titleName;
+  }
+
   const host = hostname(result.url);
   if (host) {
     const root = host.split(".")[0] || host;
@@ -38,7 +65,7 @@ function companyNameFromResult(result: SearchResult) {
       .join(" ");
   }
 
-  return result.title?.split(/[|–—-]/)[0]?.trim() || "Unknown Company";
+  return "Unknown Company";
 }
 
 function toRawLead(
@@ -49,7 +76,7 @@ function toRawLead(
   if (!result.url) return null;
 
   const domain = hostname(result.url);
-  if (!domain) return null;
+  if (!domain || isExcludedDomain(domain)) return null;
 
   return {
     companyName: companyNameFromResult(result),
