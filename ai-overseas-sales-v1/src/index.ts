@@ -12,6 +12,7 @@ import { getDueFollowups } from "./services/followup.js";
 import { ingestLeadBatch } from "./services/bulk-ingestion.js";
 import { databaseHealth } from "./services/system-health.js";
 import { db } from "./db.js";
+import { migrateToNeon } from "./services/neon-migration.js";
 import { previewCollection, collectAndIngest } from "./services/collector-pipeline.js";
 import { collectEnrichAndIngest } from "./services/enriched-collector.js";
 import { enrichFromWebsite } from "./services/site-enrichment.js";
@@ -447,6 +448,19 @@ app.setErrorHandler((error, _request, reply) => {
 app.listen({ port: env.PORT, host: "0.0.0.0" })
   .then(async () => {
     app.log.info({ hasBootstrapCollection: Boolean(env.BOOTSTRAP_COLLECTION_JSON), hasBootstrapRaw: Boolean(env.BOOTSTRAP_RAW_LEADS_JSON) }, "bootstrap env status");
+
+    if (env.MIGRATE_TO_NEON === "true" && env.NEON_DATABASE_URL) {
+      try {
+        app.log.info("Neon migration started");
+        const migration = await migrateToNeon(env.NEON_DATABASE_URL);
+        app.log.info(migration, "Neon migration completed");
+      } catch (error) {
+        app.log.error(
+          error instanceof Error ? error : new Error("Neon migration failed"),
+          "Neon migration failed"
+        );
+      }
+    }
 
     if (env.LOG_LEADS_COUNTRY) {
       try {
