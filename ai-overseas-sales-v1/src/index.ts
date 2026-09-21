@@ -139,9 +139,10 @@ app.post("/v1/replies/classify", async (request, reply) => {
 
 app.setErrorHandler((error, _request, reply) => {
   app.log.error(error);
+  const message = error instanceof Error ? error.message : "Unknown error";
   reply.code(500).send({
     error: "INTERNAL_ERROR",
-    message: error.message
+    message
   });
 });
 
