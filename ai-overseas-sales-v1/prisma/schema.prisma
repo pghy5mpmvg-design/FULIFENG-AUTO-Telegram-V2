@@ -1,0 +1,159 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum LeadGrade {
+  A
+  B
+  C
+  D
+}
+
+enum LeadStatus {
+  NEW
+  QUALIFIED
+  CONTACTED
+  REPLIED
+  INTERESTED
+  QUOTATION
+  NEGOTIATION
+  WON
+  LOST
+  DO_NOT_CONTACT
+}
+
+enum MessageChannel {
+  EMAIL
+  WHATSAPP
+  TELEGRAM
+  LINKEDIN
+  OTHER
+}
+
+model Company {
+  id           String    @id @default(cuid())
+  name         String
+  domain       String?   @unique
+  website      String?
+  country      String?
+  city         String?
+  industry     String?
+  businessType String?
+  companySize  String?
+  source       String?
+  sourceUrl    String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  contacts Contact[]
+  leads    Lead[]
+
+  @@index([country, industry])
+}
+
+model Contact {
+  id        String   @id @default(cuid())
+  companyId String
+  fullName  String?
+  position  String?
+  email     String?  @unique
+  phone     String?
+  whatsapp  String?
+  telegram  String?
+  linkedin  String?
+  language  String?
+  verified  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  leads   Lead[]
+
+  @@index([companyId])
+}
+
+model Lead {
+  id               String      @id @default(cuid())
+  companyId        String
+  contactId        String?
+  grade            LeadGrade   @default(D)
+  score            Int         @default(0)
+  status           LeadStatus  @default(NEW)
+  reason           String?
+  recommendedOffer String?
+  ownerId          String?
+  firstContactAt   DateTime?
+  lastContactAt    DateTime?
+  nextFollowupAt   DateTime?
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+
+  company   Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  contact   Contact?  @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  messages  OutreachMessage[]
+  activities Activity[]
+
+  @@index([grade, status])
+  @@index([nextFollowupAt])
+}
+
+model Campaign {
+  id          String   @id @default(cuid())
+  name        String
+  country     String?
+  industry    String?
+  active      Boolean  @default(true)
+  dailyLimit  Int      @default(40)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  messages OutreachMessage[]
+}
+
+model OutreachMessage {
+  id          String         @id @default(cuid())
+  leadId      String
+  campaignId  String?
+  channel     MessageChannel
+  subject     String?
+  body        String
+  status      String         @default("QUEUED")
+  providerId  String?
+  sentAt      DateTime?
+  repliedAt   DateTime?
+  error       String?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  lead      Lead      @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  campaign  Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+}
+
+model Blacklist {
+  id        String   @id @default(cuid())
+  channel   MessageChannel
+  value     String
+  reason    String?
+  createdAt DateTime @default(now())
+
+  @@unique([channel, value])
+}
+
+model Activity {
+  id        String   @id @default(cuid())
+  leadId    String
+  type      String
+  payload   Json?
+  createdAt DateTime @default(now())
+
+  lead Lead @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@index([leadId, createdAt])
+}
