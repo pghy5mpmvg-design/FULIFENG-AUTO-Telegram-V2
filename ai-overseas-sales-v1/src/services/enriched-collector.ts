@@ -4,7 +4,7 @@ import { ingestLeadBatch } from "./bulk-ingestion.js";
 import type { SearchCollectorInput } from "./search-providers.js";
 
 export async function collectEnrichAndIngest(
-  env: { TAVILY_API_KEY?: string; SERPER_API_KEY?: string },
+  env: { TAVILY_API_KEY?: string; SERPER_API_KEY?: string; SERPAPI_API_KEY?: string },
   input: SearchCollectorInput
 ) {
   const preview = await previewCollection(env, input);
