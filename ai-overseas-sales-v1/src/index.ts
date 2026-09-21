@@ -286,6 +286,8 @@ app.setErrorHandler((error, _request, reply) => {
 
 app.listen({ port: env.PORT, host: "0.0.0.0" })
   .then(async () => {
+    app.log.info({ hasBootstrapCollection: Boolean(env.BOOTSTRAP_COLLECTION_JSON), hasBootstrapRaw: Boolean(env.BOOTSTRAP_RAW_LEADS_JSON) }, "bootstrap env status");
+
     if (env.BOOTSTRAP_COLLECTION_JSON) {
       try {
         const parsed = JSON.parse(env.BOOTSTRAP_COLLECTION_JSON) as {
