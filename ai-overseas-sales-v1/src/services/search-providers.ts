@@ -91,15 +91,23 @@ function toRawLead(
 }
 
 function buildQuery(input: SearchCollectorInput) {
-  const terms = [
+  const keywordBlock = (input.keywords || [])
+    .filter(Boolean)
+    .map(k => `"${k}"`)
+    .join(" OR ");
+
+  const market = [input.country, input.industry].filter(Boolean).join(" ");
+
+  if (keywordBlock) {
+    return `${market} (${keywordBlock})`;
+  }
+
+  return [
+    input.country,
     input.industry,
     input.businessType,
-    "importer distributor dealer wholesaler",
-    input.country,
-    ...(input.keywords || [])
-  ].filter(Boolean);
-
-  return terms.join(" ");
+    "importer dealer distributor wholesaler"
+  ].filter(Boolean).join(" ");
 }
 
 export async function collectWithTavily(
